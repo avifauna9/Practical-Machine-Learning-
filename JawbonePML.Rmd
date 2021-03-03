@@ -1,0 +1,120 @@
+---
+title: "Jawbone"
+date: "3/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load r Packages
+```{r load packages and set seed, echo=TRUE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+library(corrplot)
+library(gbm)
+set.seed(12345)
+```
+
+# Get and Clean the Data
+```{r get and partition data, echo=TRUE}
+# Download data from given URLs
+TrainData <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+TestData  <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training <- read.csv(url(TrainData))
+testing  <- read.csv(url(TestData))
+
+# Partition training data set
+inTrain  <- createDataPartition(training$classe, p=0.7, list=FALSE)
+TrainSet <- training[inTrain, ]
+TestSet  <- training[-inTrain, ]
+dim(TrainSet)
+dim(TestSet)
+```
+
+```{r clean data, echo=TRUE}
+# Remove variables that are mostly NA
+MostlyNA    <- sapply(TrainSet, function(x) mean(is.na(x))) > 0.95
+TrainSet <- TrainSet[, MostlyNA==FALSE]
+TestSet  <- TestSet[, MostlyNA==FALSE]
+dim(TrainSet)
+dim(TestSet)
+
+# Remove variables with Nearly Zero Variance
+NZV <- nearZeroVar(TrainSet)
+TrainSet <- TrainSet[, -NZV]
+TestSet  <- TestSet[, -NZV]
+dim(TrainSet)
+dim(TestSet)
+
+# Remove ID only variables 
+TrainSet <- TrainSet[, -(1:5)]
+TestSet  <- TestSet[, -(1:5)]
+dim(TrainSet)
+dim(TestSet)
+```
+
+## There are now only 54 variables to account for in the analysis. Squeaky clean data.
+
+## Before modeling, we examine the correlation between remaining variables.
+
+```{r variable correlation, echo=TRUE}
+corMatrix <- cor(TrainSet[, -54])
+corrplot(corMatrix, order = "FPC", method = "shade", type = "full", 
+         tl.cex = 0.5)
+```
+## Variables with the most saturated colors are most correlated. Variables darkest red have a strong negative correlation, variables with darkest blue have a strong positive correlation. 
+
+# Build Prediction Models
+## Generalized Boosted Regression Model
+```{r GBM, echo=TRUE}
+set.seed(12345)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modGBM  <- train(classe ~ ., data=TrainSet, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+modGBM$finalModel
+```
+
+```{r GBM prediction on test data, echo=TRUE}
+# GBM prediction on the test data set
+predictGBM <- predict(modGBM, newdata=TestSet)
+TestSet$classe <- as.factor(TestSet$classe)
+comaGBM <- confusionMatrix(predictGBM, TestSet$classe)
+comaGBM
+
+# plot matrix results
+plot(comaGBM$table, col = comaGBM$byClass, 
+     main = paste("Generalized Boosted Regression Model Accuracy =", round(comaGBM$overall['Accuracy'], 3)))
+```
+
+## Random Forest Model
+```{r rf, echo=TRUE}
+set.seed(12345)
+controlRF <- trainControl(method="cv", number=4, verboseIter=FALSE)
+modFitRF <- train(classe ~ ., data=TrainSet, method="rf",
+                          trControl=controlRF)
+modFitRF$finalModel
+```
+
+```{r fr pred, echo=TRUE}
+# RF prediction on the test data set
+predictRF <- predict(modFitRF, newdata=TestSet)
+comaRF <- confusionMatrix(predictRF, TestSet$classe)
+comaRF
+
+# Plot matrix results
+plot(comaRF$table, col = comaRF$byClass, 
+     main = paste("Random Forest - Accuracy =",
+                  round(comaRF$overall['Accuracy'], 3)))
+```
+
+# The Random Forest model has a higher accuracy (.998) than the GBM (.988) so I'll apply this one to the testing dataset as shown below:
+```{ r testing, echo=TRUE}
+predictTEST <- predict(modFitRF, newdata=testing)
+predictTEST
+```
